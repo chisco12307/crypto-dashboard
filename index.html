@@ -173,7 +173,6 @@
             <input id="inpTC" type="number" step="any" placeholder="Ej. 19.50" required class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-500">
             <button type="button" onclick="autoFetchTC()" id="btnAutoTC" class="bg-indigo-600 hover:bg-indigo-500 text-xs px-3 rounded-lg font-medium transition whitespace-nowrap">Auto TC</button>
           </div>
-          <p class="text-[10px] text-slate-500 mt-1">"Auto TC" consulta la tasa interbancaria global. Si usas Banxico, puedes escribirlo manual.</p>
         </div>
 
         <div class="flex justify-end gap-2 pt-3">
@@ -229,16 +228,15 @@
 
     async function fetchTCActual() {
       try {
-        const res = await fetch('https://api.frankfurter.dev/v1/latest?base=USD&symbols=MXN', { mode: 'cors' });
+        const res = await fetch('https://api.frankfurter.dev/v1/latest?base=USD&symbols=MXN');
         const data = await res.json();
         if(data.rates && data.rates.MXN) {
           P.tcActual = data.rates.MXN;
           document.getElementById('tcStatus').textContent = `TC Actual: $${P.tcActual.toFixed(2)}`;
         }
       } catch (err) {
-        console.warn("Frankfurter falló:", err);
         try {
-            const res2 = await fetch('https://api.exchangerate-api.com/v4/latest/USD', { mode: 'cors' });
+            const res2 = await fetch('https://api.exchangerate-api.com/v4/latest/USD');
             const data2 = await res2.json();
             if(data2.rates && data2.rates.MXN) {
                 P.tcActual = data2.rates.MXN;
@@ -250,11 +248,11 @@
       }
     }
 
-    // SOLUCIÓN AL ERROR DE MEXC: Uso de Proxy CORS AllOrigins
+    // CORRECCIÓN MEXC: Usar corsproxy.io que es mucho más estable
     async function fetchMEXCPrices() {
       try {
         const targetUrl = encodeURIComponent('https://api.mexc.com/api/v3/ticker/price');
-        const proxyUrl = `https://api.allorigins.win/raw?url=${targetUrl}`;
+        const proxyUrl = `https://corsproxy.io/?${targetUrl}`;
         
         const res = await fetch(proxyUrl);
         const data = await res.json();
@@ -282,7 +280,7 @@
       const url = isToday ? 'https://api.frankfurter.dev/v1/latest?base=USD&symbols=MXN' : `https://api.frankfurter.dev/v1/${fecha}?base=USD&symbols=MXN`;
       
       try {
-        const res = await fetch(url, { mode: 'cors' });
+        const res = await fetch(url);
         const data = await res.json();
         if(data.rates && data.rates.MXN) {
           document.getElementById('inpTC').value = data.rates.MXN.toFixed(4);
@@ -290,13 +288,12 @@
           alert("No hay TC disponible para esa fecha.");
         }
       } catch (e) {
-        alert("El navegador bloqueó la conexión. Ingresa el TC manualmente.");
+        alert("Ingresa el TC manualmente.");
       } finally {
         btn.textContent = 'Auto TC';
       }
     }
 
-    // MOTOR CONTABLE
     function calculateAndRender() {
       let portfolio = {};
       let totalInvertidoMxn = 0;
@@ -413,13 +410,13 @@
               headers: { 'Content-Type': 'text/plain' },
               body: JSON.stringify(payload) 
           });
-          setTimeout(() => syncFromCloud(), 1500); 
-        } catch(err) { console.error("Error guardando en nube", err); }
+          setTimeout(() => syncFromCloud(), 2000); 
+        } catch(err) { console.error("Error", err); }
       }
     }
 
     async function deletePurchase(id) {
-      if(!confirm("¿Eliminar este registro? Alterará tu promedio de compra.")) return;
+      if(!confirm("¿Eliminar este registro?")) return;
       P.registros = P.registros.filter(r => r.id !== id);
       localStorage.setItem('crypto_logs', JSON.stringify(P.registros));
       calculateAndRender();
@@ -433,38 +430,48 @@
                 body: JSON.stringify({ action: 'delete', id }) 
             }); 
         }
-        catch(err) { console.error("Error eliminando en nube", err); }
+        catch(err) { console.error("Error", err); }
       }
     }
 
-    // SOLUCIÓN AL ERROR DE GOOGLE SHEETS: Instrucción explícita de redirección
-    async function syncFromCloud() {
+    // CORRECCIÓN DEFINITIVA SHEETS: Usar JSONP para evitar bloqueos de CORS
+    function syncFromCloud() {
       if(!P.apiUrl) return;
       const btn = document.getElementById('btnRefresh');
       btn.textContent = '...';
-      try {
-        const res = await fetch(P.apiUrl.trim(), { 
-            method: 'GET',
-            redirect: 'follow' 
-        });
-        
-        const data = await res.json();
+      
+      const scriptId = 'jsonp-script-' + Date.now();
+      const callbackName = 'jsonpCallback_' + Date.now();
+      
+      // Función que se ejecutará cuando Google responda
+      window[callbackName] = function(data) {
         if(data.status === 'ok') {
           P.registros = data.registros;
           localStorage.setItem('crypto_logs', JSON.stringify(P.registros));
           calculateAndRender();
         }
-      } catch (err) { 
-          alert('Error de conexión con Sheets. Por favor revisa que en el botón de Configuración ⚙️ hayas pegado la URL correcta que termina en /exec. Si el error persiste, asegúrate de que en Google Apps Script, al implementar la web app, seleccionaste "Cualquiera" en "Quién tiene acceso".'); 
-          console.error("Detalle técnico:", err);
-      }
-      finally { btn.textContent = '⟳'; }
+        document.getElementById(scriptId).remove();
+        delete window[callbackName];
+        btn.textContent = '⟳';
+      };
+
+      // Inyectamos el script para hacer la petición a prueba de CORS
+      const script = document.createElement('script');
+      script.id = scriptId;
+      script.src = `${P.apiUrl}?callback=${callbackName}`;
+      
+      script.onerror = function() {
+        alert("Error de conexión con Sheets. Revisa la URL ingresada.");
+        btn.textContent = '⟳';
+      };
+
+      document.body.appendChild(script);
     }
 
     async function refreshData() {
       await fetchTCActual();
       await fetchMEXCPrices();
-      if(P.apiUrl) await syncFromCloud();
+      if(P.apiUrl) syncFromCloud();
       else calculateAndRender();
     }
 
