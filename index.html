@@ -201,7 +201,7 @@
       apiUrl: localStorage.getItem('crypto_sheets_url') || '',
       registros: JSON.parse(localStorage.getItem('crypto_logs')) || [],
       mexcPrices: {},
-      tcActual: 19.50 // Default temporal si falla la red
+      tcActual: 19.50
     };
 
     const fmtMoney = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' });
@@ -227,7 +227,6 @@
       }, 60000);
     }
 
-    // RED MODIFICADA PARA EVITAR CORS EN ARCHIVOS LOCALES
     async function fetchTCActual() {
       try {
         const res = await fetch('https://api.frankfurter.dev/v1/latest?base=USD&symbols=MXN', { mode: 'cors' });
@@ -238,7 +237,6 @@
         }
       } catch (err) {
         console.warn("Frankfurter falló:", err);
-        // Fallback a otra API pública si falla por CORS
         try {
             const res2 = await fetch('https://api.exchangerate-api.com/v4/latest/USD', { mode: 'cors' });
             const data2 = await res2.json();
@@ -252,13 +250,19 @@
       }
     }
 
+    // SOLUCIÓN AL ERROR DE MEXC: Uso de Proxy CORS AllOrigins
     async function fetchMEXCPrices() {
       try {
-        const res = await fetch('https://api.mexc.com/api/v3/ticker/price', { mode: 'cors' });
+        const targetUrl = encodeURIComponent('https://api.mexc.com/api/v3/ticker/price');
+        const proxyUrl = `https://api.allorigins.win/raw?url=${targetUrl}`;
+        
+        const res = await fetch(proxyUrl);
         const data = await res.json();
+        
         data.forEach(coin => {
           P.mexcPrices[coin.symbol] = parseFloat(coin.price);
         });
+        
         document.getElementById('mexcStatus').className = "text-emerald-400";
         document.getElementById('mexcStatus').textContent = "● MEXC Live";
       } catch (err) {
@@ -375,7 +379,6 @@
       `).join('');
     }
 
-    // MODIFICACIONES CLAVE PARA APPS SCRIPT EN MODO LOCAL
     function saveApiUrl() {
       P.apiUrl = document.getElementById('apiUrlInput').value.trim();
       localStorage.setItem('crypto_sheets_url', P.apiUrl);
@@ -406,11 +409,10 @@
         try {
           await fetch(P.apiUrl, { 
               method: 'POST', 
-              mode: 'no-cors', // Evita bloqueos preflight en navegadores estrictos
+              mode: 'no-cors',
               headers: { 'Content-Type': 'text/plain' },
               body: JSON.stringify(payload) 
           });
-          // Forzamos un retraso para asegurar que Sheets guardó antes de pedir los datos de vuelta
           setTimeout(() => syncFromCloud(), 1500); 
         } catch(err) { console.error("Error guardando en nube", err); }
       }
@@ -435,12 +437,17 @@
       }
     }
 
+    // SOLUCIÓN AL ERROR DE GOOGLE SHEETS: Instrucción explícita de redirección
     async function syncFromCloud() {
       if(!P.apiUrl) return;
       const btn = document.getElementById('btnRefresh');
       btn.textContent = '...';
       try {
-        const res = await fetch(P.apiUrl, { mode: 'cors' });
+        const res = await fetch(P.apiUrl.trim(), { 
+            method: 'GET',
+            redirect: 'follow' 
+        });
+        
         const data = await res.json();
         if(data.status === 'ok') {
           P.registros = data.registros;
@@ -448,8 +455,8 @@
           calculateAndRender();
         }
       } catch (err) { 
-          alert('Brave bloqueó la conexión a Sheets porque estás abriendo un archivo local (file://). Presiona el ícono del león en la barra de direcciones de Brave y "Desactiva los escudos para este sitio" para que funcione.'); 
-          console.error(err);
+          alert('Error de conexión con Sheets. Por favor revisa que en el botón de Configuración ⚙️ hayas pegado la URL correcta que termina en /exec. Si el error persiste, asegúrate de que en Google Apps Script, al implementar la web app, seleccionaste "Cualquiera" en "Quién tiene acceso".'); 
+          console.error("Detalle técnico:", err);
       }
       finally { btn.textContent = '⟳'; }
     }
