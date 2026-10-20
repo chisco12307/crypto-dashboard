@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Crypto Dashboard Pro</title>
+  <meta name="theme-color" content="#0f172a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <script>
+    const manifest = {
+      name: "Crypto Tracker",
+      short_name: "Crypto",
+      start_url: ".",
+      display: "standalone",
+      background_color: "#0f172a",
+      theme_color: "#0f172a",
+      icons: [{
+        src: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='45' fill='%23f59e0b'/><text x='50' y='65' font-family='Arial' font-size='40' font-weight='bold' fill='white' text-anchor='middle'>₿</text></svg>",
+        sizes: "192x192",
+        type: "image/svg+xml"
+      }]
+    };
+    const link = document.createElement('link');
+    link.rel = 'manifest';
+    link.href = 'data:application/manifest+json;charset=utf-8,' + encodeURIComponent(JSON.stringify(manifest));
+    document.head.appendChild(link);
+  </script>
+</head>
+<body class="bg-slate-900 text-slate-200 min-h-screen font-sans pb-16">
+
+  <!-- Header -->
+  <header class="border-b border-slate-800 bg-slate-900/90 backdrop-blur sticky top-0 z-20">
+    <div class="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-full bg-amber-500 flex items-center justify-center font-bold text-slate-900 shadow-lg shadow-amber-500/20 text-xl">₿</div>
+        <div>
+          <h1 class="text-lg font-bold leading-tight">Portafolio Crypto</h1>
+          <div class="flex items-center gap-2 text-xs text-slate-400">
+            <span id="tcStatus">TC Actual: Cargando...</span>
+            <span class="text-slate-600">|</span>
+            <span id="mexcStatus" class="text-emerald-400">● MEXC Live</span>
+          </div>
+        </div>
+      </div>
+      <div class="flex gap-2">
+        <button onclick="refreshData()" id="btnRefresh" class="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs transition">⟳</button>
+        <button onclick="openModal('configModal')" class="p-2 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-xs font-bold transition">⚙</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-5xl mx-auto px-4 mt-6 space-y-6">
+
+    <!-- KPIs Globales -->
+    <section class="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
+      <div class="bg-slate-800/60 border border-slate-700 rounded-2xl p-4">
+        <p class="text-[10px] text-slate-400 uppercase tracking-wider">Saldo Actual (MXN)</p>
+        <p id="kpiSaldoActual" class="text-xl sm:text-2xl font-extrabold text-white mt-1">$0.00</p>
+      </div>
+      <div class="bg-slate-800/60 border border-slate-700 rounded-2xl p-4">
+        <p class="text-[10px] text-slate-400 uppercase tracking-wider">Invertido Histórico (MXN)</p>
+        <p id="kpiInvertido" class="text-xl sm:text-2xl font-extrabold text-slate-300 mt-1">$0.00</p>
+      </div>
+      <div class="bg-slate-800/60 border border-slate-700 rounded-2xl p-4">
+        <p class="text-[10px] text-slate-400 uppercase tracking-wider">Ganancia Neta Total</p>
+        <p id="kpiGananciaNeta" class="text-xl sm:text-2xl font-extrabold mt-1">$0.00</p>
+      </div>
+      <div class="bg-slate-800/60 border border-slate-700 rounded-2xl p-4 flex flex-col justify-center">
+        <div class="flex justify-between items-center mb-1">
+          <span class="text-[10px] text-slate-400">Por Valor Cripto:</span>
+          <span id="kpiGananciaValor" class="text-xs font-bold">...</span>
+        </div>
+        <div class="flex justify-between items-center">
+          <span class="text-[10px] text-slate-400">Por Tipo Cambio:</span>
+          <span id="kpiGananciaTC" class="text-xs font-bold">...</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Botón Agregar -->
+    <div class="flex justify-end">
+      <button onclick="openModal('addModal')" class="bg-emerald-500 hover:bg-emerald-400 text-slate-900 font-bold px-4 py-2 rounded-xl text-sm transition shadow-lg shadow-emerald-500/20">
+        + Registrar Compra
+      </button>
+    </div>
+
+    <!-- Tabla Portafolio Agrupado -->
+    <section class="bg-slate-800/60 border border-slate-700 rounded-2xl overflow-hidden">
+      <div class="p-4 border-b border-slate-700">
+        <h2 class="font-bold text-white">Consolidado por Moneda</h2>
+        <p class="text-xs text-slate-400">Promedios calculados automáticamente</p>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-sm whitespace-nowrap">
+          <thead class="bg-slate-900/50 text-slate-400 text-xs">
+            <tr>
+              <th class="px-4 py-3 font-medium">Moneda</th>
+              <th class="px-4 py-3 font-medium">Cantidad</th>
+              <th class="px-4 py-3 font-medium">Prom. Compra (USDT)</th>
+              <th class="px-4 py-3 font-medium">Precio Actual (USDT)</th>
+              <th class="px-4 py-3 font-medium text-right">Saldo Actual (MXN)</th>
+              <th class="px-4 py-3 font-medium text-right">Ganancia Neta</th>
+            </tr>
+          </thead>
+          <tbody id="portfolioBody" class="divide-y divide-slate-700/50">
+            <!-- Renderizado JS -->
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Tabla Historial Operaciones -->
+    <section class="bg-slate-800/60 border border-slate-700 rounded-2xl overflow-hidden">
+      <div class="p-4 border-b border-slate-700">
+        <h2 class="font-bold text-white">Historial de Operaciones</h2>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-sm whitespace-nowrap">
+          <thead class="bg-slate-900/50 text-slate-400 text-xs">
+            <tr>
+              <th class="px-4 py-3 font-medium">Fecha</th>
+              <th class="px-4 py-3 font-medium">Moneda</th>
+              <th class="px-4 py-3 font-medium text-right">Cant.</th>
+              <th class="px-4 py-3 font-medium text-right">Precio (USDT)</th>
+              <th class="px-4 py-3 font-medium text-right">TC (MXN)</th>
+              <th class="px-4 py-3 font-medium text-right">Costo (MXN)</th>
+              <th class="px-4 py-3 font-medium text-center">Acción</th>
+            </tr>
+          </thead>
+          <tbody id="historyBody" class="divide-y divide-slate-700/50 text-slate-300">
+            <!-- Renderizado JS -->
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Modal Agregar Compra -->
+  <div id="addModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+    <div class="bg-slate-800 border border-slate-700 rounded-2xl max-w-sm w-full p-5 space-y-4 shadow-2xl">
+      <h3 class="text-lg font-bold text-white border-b border-slate-700 pb-2">Registrar Compra</h3>
+      <form onsubmit="addPurchase(event)" class="space-y-3">
+        
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs text-slate-400 mb-1">Moneda</label>
+            <input id="inpMoneda" type="text" placeholder="Ej. ADA, SOL" required class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-500 uppercase">
+          </div>
+          <div>
+            <label class="block text-xs text-slate-400 mb-1">Fecha</label>
+            <input id="inpFecha" type="date" required class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-500">
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs text-slate-400 mb-1">Cantidad Crypto</label>
+            <input id="inpCantidad" type="number" step="any" placeholder="0.00" required class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-500">
+          </div>
+          <div>
+            <label class="block text-xs text-slate-400 mb-1">Precio Compra (USDT)</label>
+            <input id="inpPrecio" type="number" step="any" placeholder="0.00" required class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-500">
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs text-slate-400 mb-1">Tipo de Cambio MXN (Día de compra)</label>
+          <div class="flex gap-2">
+            <input id="inpTC" type="number" step="any" placeholder="Ej. 19.50" required class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-500">
+            <button type="button" onclick="autoFetchTC()" id="btnAutoTC" class="bg-indigo-600 hover:bg-indigo-500 text-xs px-3 rounded-lg font-medium transition whitespace-nowrap">Auto TC</button>
+          </div>
+          <p class="text-[10px] text-slate-500 mt-1">"Auto TC" consulta la tasa interbancaria global. Si usas Banxico, puedes escribirlo manual.</p>
+        </div>
+
+        <div class="flex justify-end gap-2 pt-3">
+          <button type="button" onclick="closeModal('addModal')" class="px-4 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-xs font-medium transition">Cancelar</button>
+          <button type="submit" class="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-900 text-xs font-bold transition">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal Configuración -->
+  <div id="configModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+    <div class="bg-slate-800 border border-slate-700 rounded-2xl max-w-sm w-full p-5 space-y-4">
+      <h3 class="text-lg font-bold text-white">Conexión a Sheets</h3>
+      <input id="apiUrlInput" type="url" placeholder="URL de Apps Script (/exec)" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none">
+      <div class="flex justify-end gap-2 pt-2">
+        <button onclick="closeModal('configModal')" class="px-4 py-2 rounded-xl bg-slate-700 text-xs font-medium">Cancelar</button>
+        <button onclick="saveApiUrl()" class="px-4 py-2 rounded-xl bg-indigo-600 text-xs font-bold">Conectar</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const P = {
+      apiUrl: localStorage.getItem('crypto_sheets_url') || '',
+      registros: JSON.parse(localStorage.getItem('crypto_logs')) || [],
+      mexcPrices: {},
+      tcActual: 19.50 // Default temporal si falla la red
+    };
+
+    const fmtMoney = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' });
+    const fmtUsd = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 6 });
+    const formatColor = (val) => val >= 0 ? 'text-emerald-400' : 'text-rose-400';
+    const formatSign = (val) => val >= 0 ? '+' : '';
+
+    function openModal(id) { document.getElementById(id).classList.remove('hidden'); document.getElementById(id).classList.add('flex'); }
+    function closeModal(id) { document.getElementById(id).classList.add('hidden'); document.getElementById(id).classList.remove('flex'); }
+    
+    document.getElementById('inpFecha').valueAsDate = new Date();
+    document.getElementById('apiUrlInput').value = P.apiUrl;
+
+    async function init() {
+      await fetchTCActual();
+      await fetchMEXCPrices();
+      calculateAndRender();
+      if (P.apiUrl) syncFromCloud();
+      
+      setInterval(async () => {
+        await fetchMEXCPrices();
+        calculateAndRender();
+      }, 60000);
+    }
+
+    // RED MODIFICADA PARA EVITAR CORS EN ARCHIVOS LOCALES
+    async function fetchTCActual() {
+      try {
+        const res = await fetch('https://api.frankfurter.dev/v1/latest?base=USD&symbols=MXN', { mode: 'cors' });
+        const data = await res.json();
+        if(data.rates && data.rates.MXN) {
+          P.tcActual = data.rates.MXN;
+          document.getElementById('tcStatus').textContent = `TC Actual: $${P.tcActual.toFixed(2)}`;
+        }
+      } catch (err) {
+        console.warn("Frankfurter falló:", err);
+        // Fallback a otra API pública si falla por CORS
+        try {
+            const res2 = await fetch('https://api.exchangerate-api.com/v4/latest/USD', { mode: 'cors' });
+            const data2 = await res2.json();
+            if(data2.rates && data2.rates.MXN) {
+                P.tcActual = data2.rates.MXN;
+                document.getElementById('tcStatus').textContent = `TC Actual: $${P.tcActual.toFixed(2)}`;
+            }
+        } catch (err2) {
+            document.getElementById('tcStatus').textContent = `TC Actual: Falló red`;
+        }
+      }
+    }
+
+    async function fetchMEXCPrices() {
+      try {
+        const res = await fetch('https://api.mexc.com/api/v3/ticker/price', { mode: 'cors' });
+        const data = await res.json();
+        data.forEach(coin => {
+          P.mexcPrices[coin.symbol] = parseFloat(coin.price);
+        });
+        document.getElementById('mexcStatus').className = "text-emerald-400";
+        document.getElementById('mexcStatus').textContent = "● MEXC Live";
+      } catch (err) {
+        console.warn("MEXC falló:", err);
+        document.getElementById('mexcStatus').className = "text-rose-400";
+        document.getElementById('mexcStatus').textContent = "● MEXC Error";
+      }
+    }
+
+    async function autoFetchTC() {
+      const fecha = document.getElementById('inpFecha').value;
+      if (!fecha) return alert("Selecciona la fecha primero.");
+      
+      const btn = document.getElementById('btnAutoTC');
+      btn.textContent = '...';
+      const isToday = fecha === new Date().toISOString().split('T')[0];
+      const url = isToday ? 'https://api.frankfurter.dev/v1/latest?base=USD&symbols=MXN' : `https://api.frankfurter.dev/v1/${fecha}?base=USD&symbols=MXN`;
+      
+      try {
+        const res = await fetch(url, { mode: 'cors' });
+        const data = await res.json();
+        if(data.rates && data.rates.MXN) {
+          document.getElementById('inpTC').value = data.rates.MXN.toFixed(4);
+        } else {
+          alert("No hay TC disponible para esa fecha.");
+        }
+      } catch (e) {
+        alert("El navegador bloqueó la conexión. Ingresa el TC manualmente.");
+      } finally {
+        btn.textContent = 'Auto TC';
+      }
+    }
+
+    // MOTOR CONTABLE
+    function calculateAndRender() {
+      let portfolio = {};
+      let totalInvertidoMxn = 0;
+      let totalCostoConTcActualMxn = 0;
+      let totalActualMxn = 0;
+
+      P.registros.forEach(r => {
+        if (!portfolio[r.moneda]) {
+          portfolio[r.moneda] = { moneda: r.moneda, cantidad: 0, costoUsd: 0, costoMxnHist: 0 };
+        }
+        portfolio[r.moneda].cantidad += r.cantidad;
+        portfolio[r.moneda].costoUsd += (r.cantidad * r.precioUsd);
+        portfolio[r.moneda].costoMxnHist += (r.cantidad * r.precioUsd * r.tcCompraMxn);
+
+        totalInvertidoMxn += (r.cantidad * r.precioUsd * r.tcCompraMxn);
+        totalCostoConTcActualMxn += (r.cantidad * r.precioUsd * P.tcActual);
+      });
+
+      const arrPortfolio = Object.values(portfolio).map(p => {
+        let precioActual = P.mexcPrices[p.moneda + 'USDT'] || 0;
+        let promedioUsd = p.cantidad > 0 ? (p.costoUsd / p.cantidad) : 0;
+        let valorMxn = p.cantidad * precioActual * P.tcActual;
+        
+        totalActualMxn += valorMxn;
+
+        let gananciaNetaMxn = valorMxn - p.costoMxnHist;
+        let porcentaje = p.costoMxnHist > 0 ? (gananciaNetaMxn / p.costoMxnHist) * 100 : 0;
+
+        return { ...p, precioActual, promedioUsd, valorMxn, gananciaNetaMxn, porcentaje };
+      });
+
+      let gananciaCambiariaGlobal = totalCostoConTcActualMxn - totalInvertidoMxn;
+      let gananciaValorCryptoGlobal = totalActualMxn - totalCostoConTcActualMxn;
+      let gananciaNetaGlobal = totalActualMxn - totalInvertidoMxn;
+
+      document.getElementById('kpiSaldoActual').textContent = fmtMoney.format(totalActualMxn);
+      document.getElementById('kpiInvertido').textContent = fmtMoney.format(totalInvertidoMxn);
+      
+      const kpiNeta = document.getElementById('kpiGananciaNeta');
+      kpiNeta.textContent = fmtMoney.format(gananciaNetaGlobal);
+      kpiNeta.className = `text-xl sm:text-2xl font-extrabold mt-1 ${formatColor(gananciaNetaGlobal)}`;
+
+      document.getElementById('kpiGananciaValor').textContent = formatSign(gananciaValorCryptoGlobal) + fmtMoney.format(gananciaValorCryptoGlobal);
+      document.getElementById('kpiGananciaValor').className = `text-xs font-bold ${formatColor(gananciaValorCryptoGlobal)}`;
+      
+      document.getElementById('kpiGananciaTC').textContent = formatSign(gananciaCambiariaGlobal) + fmtMoney.format(gananciaCambiariaGlobal);
+      document.getElementById('kpiGananciaTC').className = `text-xs font-bold ${formatColor(gananciaCambiariaGlobal)}`;
+
+      const tbodyPort = document.getElementById('portfolioBody');
+      tbodyPort.innerHTML = arrPortfolio.map(p => `
+        <tr class="hover:bg-slate-800/40">
+          <td class="px-4 py-3 font-bold text-white flex items-center gap-2">
+            <span class="w-6 h-6 rounded-full bg-slate-700 flex items-center justify-center text-[10px] text-amber-400 border border-slate-600">${p.moneda.charAt(0)}</span>
+            ${p.moneda}
+          </td>
+          <td class="px-4 py-3">${p.cantidad.toLocaleString('en-US', {maximumFractionDigits: 6})}</td>
+          <td class="px-4 py-3">${fmtUsd.format(p.promedioUsd)}</td>
+          <td class="px-4 py-3">${fmtUsd.format(p.precioActual)}</td>
+          <td class="px-4 py-3 text-right font-semibold">${fmtMoney.format(p.valorMxn)}</td>
+          <td class="px-4 py-3 text-right font-bold ${formatColor(p.gananciaNetaMxn)}">
+            ${formatSign(p.gananciaNetaMxn)}${fmtMoney.format(p.gananciaNetaMxn)} <br>
+            <span class="text-[10px] opacity-80">${formatSign(p.porcentaje)}${p.porcentaje.toFixed(2)}%</span>
+          </td>
+        </tr>
+      `).join('');
+
+      const tbodyHist = document.getElementById('historyBody');
+      tbodyHist.innerHTML = [...P.registros].reverse().map(r => `
+        <tr class="hover:bg-slate-800/40 text-xs">
+          <td class="px-4 py-2">${r.fecha}</td>
+          <td class="px-4 py-2 font-bold">${r.moneda}</td>
+          <td class="px-4 py-2 text-right">${r.cantidad}</td>
+          <td class="px-4 py-2 text-right">${fmtUsd.format(r.precioUsd)}</td>
+          <td class="px-4 py-2 text-right">$${r.tcCompraMxn}</td>
+          <td class="px-4 py-2 text-right">${fmtMoney.format(r.cantidad * r.precioUsd * r.tcCompraMxn)}</td>
+          <td class="px-4 py-2 text-center">
+            <button onclick="deletePurchase('${r.id}')" class="text-slate-500 hover:text-rose-400">✕</button>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    // MODIFICACIONES CLAVE PARA APPS SCRIPT EN MODO LOCAL
+    function saveApiUrl() {
+      P.apiUrl = document.getElementById('apiUrlInput').value.trim();
+      localStorage.setItem('crypto_sheets_url', P.apiUrl);
+      closeModal('configModal');
+      syncFromCloud();
+    }
+
+    async function addPurchase(e) {
+      e.preventDefault();
+      const payload = {
+        action: 'add',
+        moneda: document.getElementById('inpMoneda').value.toUpperCase().trim(),
+        fecha: document.getElementById('inpFecha').value,
+        cantidad: parseFloat(document.getElementById('inpCantidad').value),
+        precioUsd: parseFloat(document.getElementById('inpPrecio').value),
+        tcCompraMxn: parseFloat(document.getElementById('inpTC').value)
+      };
+
+      const tempId = 'temp_' + Date.now();
+      P.registros.push({ id: tempId, ...payload });
+      localStorage.setItem('crypto_logs', JSON.stringify(P.registros));
+      closeModal('addModal');
+      e.target.reset();
+      document.getElementById('inpFecha').valueAsDate = new Date();
+      calculateAndRender();
+
+      if(P.apiUrl) {
+        try {
+          await fetch(P.apiUrl, { 
+              method: 'POST', 
+              mode: 'no-cors', // Evita bloqueos preflight en navegadores estrictos
+              headers: { 'Content-Type': 'text/plain' },
+              body: JSON.stringify(payload) 
+          });
+          // Forzamos un retraso para asegurar que Sheets guardó antes de pedir los datos de vuelta
+          setTimeout(() => syncFromCloud(), 1500); 
+        } catch(err) { console.error("Error guardando en nube", err); }
+      }
+    }
+
+    async function deletePurchase(id) {
+      if(!confirm("¿Eliminar este registro? Alterará tu promedio de compra.")) return;
+      P.registros = P.registros.filter(r => r.id !== id);
+      localStorage.setItem('crypto_logs', JSON.stringify(P.registros));
+      calculateAndRender();
+
+      if(P.apiUrl) {
+        try { 
+            await fetch(P.apiUrl, { 
+                method: 'POST', 
+                mode: 'no-cors',
+                headers: { 'Content-Type': 'text/plain' },
+                body: JSON.stringify({ action: 'delete', id }) 
+            }); 
+        }
+        catch(err) { console.error("Error eliminando en nube", err); }
+      }
+    }
+
+    async function syncFromCloud() {
+      if(!P.apiUrl) return;
+      const btn = document.getElementById('btnRefresh');
+      btn.textContent = '...';
+      try {
+        const res = await fetch(P.apiUrl, { mode: 'cors' });
+        const data = await res.json();
+        if(data.status === 'ok') {
+          P.registros = data.registros;
+          localStorage.setItem('crypto_logs', JSON.stringify(P.registros));
+          calculateAndRender();
+        }
+      } catch (err) { 
+          alert('Brave bloqueó la conexión a Sheets porque estás abriendo un archivo local (file://). Presiona el ícono del león en la barra de direcciones de Brave y "Desactiva los escudos para este sitio" para que funcione.'); 
+          console.error(err);
+      }
+      finally { btn.textContent = '⟳'; }
+    }
+
+    async function refreshData() {
+      await fetchTCActual();
+      await fetchMEXCPrices();
+      if(P.apiUrl) await syncFromCloud();
+      else calculateAndRender();
+    }
+
+    init();
+  </script>
+</body>
+</html>
