@@ -33,21 +33,28 @@
 
   <!-- Header -->
   <header class="border-b border-slate-800 bg-slate-900/90 backdrop-blur sticky top-0 z-20">
-    <div class="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
+    <div class="max-w-5xl mx-auto px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
       <div class="flex items-center gap-3">
-        <div class="w-10 h-10 rounded-full bg-amber-500 flex items-center justify-center font-bold text-slate-900 shadow-lg shadow-amber-500/20 text-xl">₿</div>
+        <div class="w-10 h-10 rounded-full bg-amber-500 flex items-center justify-center font-bold text-slate-900 shadow-lg shadow-amber-500/20 text-xl flex-shrink-0">₿</div>
         <div>
           <h1 class="text-lg font-bold leading-tight">Portafolio Crypto</h1>
           <div class="flex items-center gap-2 text-xs text-slate-400">
             <span id="tcStatus">TC Actual: Cargando...</span>
             <span class="text-slate-600">|</span>
-            <span id="mexcStatus" class="text-emerald-400">● Live</span>
+            <span id="mexcStatus" class="text-emerald-400">● Selecciona API</span>
           </div>
         </div>
       </div>
-      <div class="flex gap-2">
-        <button onclick="refreshData()" id="btnRefresh" class="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs transition">⟳</button>
-        <button onclick="openModal('configModal')" class="p-2 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-xs font-bold transition">⚙</button>
+      
+      <!-- Botones de Diagnóstico de Exchanges -->
+      <div class="flex flex-wrap gap-2 items-center">
+        <span class="text-[10px] text-slate-500 uppercase tracking-wider hidden sm:block">Actualizar desde:</span>
+        <button onclick="fetchFromAPI('binance')" class="px-2 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded text-xs font-medium transition text-yellow-500">Binance</button>
+        <button onclick="fetchFromAPI('kucoin')" class="px-2 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded text-xs font-medium transition text-green-500">KuCoin</button>
+        <button onclick="fetchFromAPI('cryptocom')" class="px-2 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded text-xs font-medium transition text-blue-500">Crypto.com</button>
+        <button onclick="fetchFromAPI('gateio')" class="px-2 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded text-xs font-medium transition text-red-400">Gate.io</button>
+        <div class="w-px h-6 bg-slate-700 mx-1"></div>
+        <button onclick="openModal('configModal')" class="p-1.5 bg-indigo-600 hover:bg-indigo-500 rounded text-xs font-bold transition" title="Configurar Sheets">⚙</button>
       </div>
     </div>
   </header>
@@ -89,9 +96,11 @@
 
     <!-- Tabla Portafolio Agrupado -->
     <section class="bg-slate-800/60 border border-slate-700 rounded-2xl overflow-hidden">
-      <div class="p-4 border-b border-slate-700">
-        <h2 class="font-bold text-white">Consolidado por Moneda</h2>
-        <p class="text-xs text-slate-400">Promedios calculados automáticamente</p>
+      <div class="p-4 border-b border-slate-700 flex justify-between items-center">
+        <div>
+            <h2 class="font-bold text-white">Consolidado por Moneda</h2>
+            <p class="text-xs text-slate-400">Promedios calculados automáticamente</p>
+        </div>
       </div>
       <div class="overflow-x-auto">
         <table class="w-full text-left text-sm whitespace-nowrap">
@@ -199,7 +208,7 @@
     const P = {
       apiUrl: localStorage.getItem('crypto_sheets_url') || '',
       registros: JSON.parse(localStorage.getItem('crypto_logs')) || [],
-      mexcPrices: {},
+      mexcPrices: {}, // Guardará objeto { price: 0.00, source: 'Binance' }
       tcActual: 19.50
     };
 
@@ -216,13 +225,17 @@
 
     async function init() {
       await fetchTCActual();
-      await fetchCryptoPrices();
-      calculateAndRender();
+      // Empezamos con Binance por defecto
+      await fetchFromAPI('binance');
       if (P.apiUrl) syncFromCloud();
       
       setInterval(async () => {
-        await fetchCryptoPrices();
-        calculateAndRender();
+        // Refresca la última fuente usada si está todo en verde
+        const status = document.getElementById('mexcStatus').textContent;
+        if(status.includes('Binance')) fetchFromAPI('binance');
+        else if(status.includes('KuCoin')) fetchFromAPI('kucoin');
+        else if(status.includes('Crypto.com')) fetchFromAPI('cryptocom');
+        else if(status.includes('Gate.io')) fetchFromAPI('gateio');
       }, 60000);
     }
 
@@ -248,57 +261,66 @@
       }
     }
 
-    // NUEVA LÓGICA HÍBRIDA: Binance (Principal) + Crypto.com (Respaldo para CRO/TRADOOR)
-    async function fetchCryptoPrices() {
+    // FUNCIONES INDIVIDUALES DE EXCHANGES PARA DIAGNÓSTICO
+    async function fetchFromAPI(exchangeName) {
+      document.getElementById('mexcStatus').className = "text-amber-400";
+      document.getElementById('mexcStatus').textContent = `● Consultando ${exchangeName}...`;
+      
+      // Limpiamos los precios anteriores para ver exactamente qué encuentra el nuevo exchange
+      P.mexcPrices = {};
+
       try {
-        // 1. Obtener de Binance (API Principal)
-        const resBinance = await fetch('https://api.binance.com/api/v3/ticker/price');
-        const dataBinance = await resBinance.json();
-        
-        dataBinance.forEach(coin => {
-          P.mexcPrices[coin.symbol] = parseFloat(coin.price);
-        });
+        if (exchangeName === 'binance') {
+            const res = await fetch('https://api.binance.com/api/v3/ticker/price');
+            const data = await res.json();
+            data.forEach(coin => {
+                const sym = coin.symbol.replace('USDT', '');
+                if(coin.symbol.endsWith('USDT')) P.mexcPrices[sym] = { price: parseFloat(coin.price), source: 'Binance' };
+            });
+            updateStatusText("● Live (Binance)", true);
 
-        // Revisar si falta alguna moneda
-        const monedasUnicas = [...new Set(P.registros.map(r => r.moneda))];
-        let faltanMonedas = false;
-        for (let m of monedasUnicas) {
-            if (!P.mexcPrices[m + 'USDT']) faltanMonedas = true;
-        }
-
-        // 2. Si faltan monedas (ej. CRO), buscamos en Crypto.com
-        if (faltanMonedas) {
-            try {
-                // Crypto.com usa formato CRO_USDT
-                const resCrypto = await fetch('https://api.crypto.com/v2/public/get-ticker');
-                const dataCrypto = await resCrypto.json();
-                
-                if (dataCrypto && dataCrypto.result && dataCrypto.result.data) {
-                    dataCrypto.result.data.forEach(coin => {
-                        // Limpiamos el guion bajo para empatar formato (CROUSDT)
-                        const symbol = coin.i.replace('_', '');
-                        if (!P.mexcPrices[symbol] && coin.i.endsWith('_USDT')) {
-                            // 'a' es el precio actual en la API de Crypto.com
-                            P.mexcPrices[symbol] = parseFloat(coin.a);
-                        }
-                    });
-                }
-            } catch (errFallback) {
-                console.warn("Fallback Crypto.com falló:", errFallback);
+        } else if (exchangeName === 'kucoin') {
+            const res = await fetch('https://api.kucoin.com/api/v1/market/allTickers');
+            const data = await res.json();
+            if (data && data.data && data.data.ticker) {
+                data.data.ticker.forEach(coin => {
+                    const sym = coin.symbol.replace('-USDT', '');
+                    if(coin.symbol.endsWith('-USDT')) P.mexcPrices[sym] = { price: parseFloat(coin.last), source: 'KuCoin' };
+                });
             }
+            updateStatusText("● Live (KuCoin)", true);
+
+        } else if (exchangeName === 'cryptocom') {
+            const res = await fetch('https://api.crypto.com/v2/public/get-ticker');
+            const data = await res.json();
+            if (data && data.result && data.result.data) {
+                data.result.data.forEach(coin => {
+                    const sym = coin.i.replace('_USDT', '');
+                    if(coin.i.endsWith('_USDT')) P.mexcPrices[sym] = { price: parseFloat(coin.a), source: 'Crypto.com' };
+                });
+            }
+            updateStatusText("● Live (Crypto.com)", true);
+
+        } else if (exchangeName === 'gateio') {
+            const res = await fetch('https://api.gateio.ws/api/v4/spot/tickers');
+            const data = await res.json();
+            data.forEach(coin => {
+                const sym = coin.currency_pair.replace('_USDT', '');
+                if(coin.currency_pair.endsWith('_USDT')) P.mexcPrices[sym] = { price: parseFloat(coin.last), source: 'Gate.io' };
+            });
+            updateStatusText("● Live (Gate.io)", true);
         }
-
-        // 3. Fallback estricto de emergencia (Por si alguna otra nueva moneda no se encuentra)
-        // P.mexcPrices['TRADOORUSDT'] = 0.001; 
-
-        document.getElementById('mexcStatus').className = "text-emerald-400";
-        document.getElementById('mexcStatus').textContent = "● Live (Multimercado)";
-        calculateAndRender();
       } catch (err) {
-        console.warn("Error APIs de Precios:", err);
-        document.getElementById('mexcStatus').className = "text-rose-400";
-        document.getElementById('mexcStatus').textContent = "● Error Precios";
+        console.warn(`Error en ${exchangeName}:`, err);
+        updateStatusText(`● Error en ${exchangeName}`, false);
       }
+      
+      calculateAndRender();
+    }
+
+    function updateStatusText(text, isSuccess) {
+        document.getElementById('mexcStatus').className = isSuccess ? "text-emerald-400 font-bold" : "text-rose-400 font-bold";
+        document.getElementById('mexcStatus').textContent = text;
     }
 
     async function autoFetchTC() {
@@ -344,7 +366,11 @@
       });
 
       const arrPortfolio = Object.values(portfolio).map(p => {
-        let precioActual = P.mexcPrices[p.moneda + 'USDT'] || 0;
+        // Leemos el objeto complejo {price, source}
+        let coinData = P.mexcPrices[p.moneda] || { price: 0, source: 'No encontrado' };
+        let precioActual = coinData.price;
+        let fuente = coinData.source;
+        
         let promedioUsd = p.cantidad > 0 ? (p.costoUsd / p.cantidad) : 0;
         let valorMxn = p.cantidad * precioActual * P.tcActual;
         
@@ -353,7 +379,7 @@
         let gananciaNetaMxn = valorMxn - p.costoMxnHist;
         let porcentaje = p.costoMxnHist > 0 ? (gananciaNetaMxn / p.costoMxnHist) * 100 : 0;
 
-        return { ...p, precioActual, promedioUsd, valorMxn, gananciaNetaMxn, porcentaje };
+        return { ...p, precioActual, fuente, promedioUsd, valorMxn, gananciaNetaMxn, porcentaje };
       });
 
       let gananciaCambiariaGlobal = totalCostoConTcActualMxn - totalInvertidoMxn;
@@ -375,14 +401,17 @@
 
       const tbodyPort = document.getElementById('portfolioBody');
       tbodyPort.innerHTML = arrPortfolio.map(p => `
-        <tr class="hover:bg-slate-800/40">
+        <tr class="hover:bg-slate-800/40 border-b border-slate-800/50">
           <td class="px-4 py-3 font-bold text-white flex items-center gap-2">
             <span class="w-6 h-6 rounded-full bg-slate-700 flex items-center justify-center text-[10px] text-amber-400 border border-slate-600">${p.moneda.charAt(0)}</span>
             ${p.moneda}
           </td>
           <td class="px-4 py-3">${p.cantidad.toLocaleString('en-US', {maximumFractionDigits: 6})}</td>
           <td class="px-4 py-3">${fmtUsd.format(p.promedioUsd)}</td>
-          <td class="px-4 py-3">${fmtUsd.format(p.precioActual)}</td>
+          <td class="px-4 py-3">
+             <div class="${p.precioActual > 0 ? 'text-slate-200' : 'text-rose-400'}">${fmtUsd.format(p.precioActual)}</div>
+             <div class="text-[9px] text-slate-500 uppercase tracking-widest">${p.fuente}</div>
+          </td>
           <td class="px-4 py-3 text-right font-semibold">${fmtMoney.format(p.valorMxn)}</td>
           <td class="px-4 py-3 text-right font-bold ${formatColor(p.gananciaNetaMxn)}">
             ${formatSign(p.gananciaNetaMxn)}${fmtMoney.format(p.gananciaNetaMxn)} <br>
@@ -498,7 +527,13 @@
 
     async function refreshData() {
       await fetchTCActual();
-      await fetchCryptoPrices();
+      // Identificamos en qué API estamos actualmente
+      const status = document.getElementById('mexcStatus').textContent;
+      if(status.includes('KuCoin')) await fetchFromAPI('kucoin');
+      else if(status.includes('Crypto.com')) await fetchFromAPI('cryptocom');
+      else if(status.includes('Gate.io')) await fetchFromAPI('gateio');
+      else await fetchFromAPI('binance');
+      
       if(P.apiUrl) syncFromCloud();
       else calculateAndRender();
     }
