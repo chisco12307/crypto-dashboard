@@ -41,17 +41,16 @@
           <div class="flex items-center gap-2 text-xs text-slate-400">
             <span id="tcStatus">TC Actual: Cargando...</span>
             <span class="text-slate-600">|</span>
-            <span id="mexcStatus" class="text-emerald-400">● Selecciona API</span>
+            <span id="apiStatus" class="text-emerald-400">● Esperando conexión...</span>
           </div>
         </div>
       </div>
       
-      <!-- Botones de Diagnóstico de Exchanges -->
+      <!-- Botones de Exchanges Eficientes -->
       <div class="flex flex-wrap gap-2 items-center">
-        <span class="text-[10px] text-slate-500 uppercase tracking-wider hidden sm:block">Actualizar desde:</span>
+        <span class="text-[10px] text-slate-500 uppercase tracking-wider hidden sm:block">Precios:</span>
+        <button onclick="fetchCombinado()" class="px-2 py-1.5 bg-emerald-600 hover:bg-emerald-500 border border-emerald-500 rounded text-xs font-bold transition text-slate-900 shadow-md shadow-emerald-500/20">Combinado</button>
         <button onclick="fetchFromAPI('binance')" class="px-2 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded text-xs font-medium transition text-yellow-500">Binance</button>
-        <button onclick="fetchFromAPI('kucoin')" class="px-2 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded text-xs font-medium transition text-green-500">KuCoin</button>
-        <button onclick="fetchFromAPI('cryptocom')" class="px-2 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded text-xs font-medium transition text-blue-500">Crypto.com</button>
         <button onclick="fetchFromAPI('gateio')" class="px-2 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded text-xs font-medium transition text-red-400">Gate.io</button>
         <div class="w-px h-6 bg-slate-700 mx-1"></div>
         <button onclick="openModal('configModal')" class="p-1.5 bg-indigo-600 hover:bg-indigo-500 rounded text-xs font-bold transition" title="Configurar Sheets">⚙</button>
@@ -101,6 +100,7 @@
             <h2 class="font-bold text-white">Consolidado por Moneda</h2>
             <p class="text-xs text-slate-400">Promedios calculados automáticamente</p>
         </div>
+        <button onclick="syncFromCloud()" id="btnSyncBig" class="px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs font-medium transition">⟳ Sincronizar Sheets</button>
       </div>
       <div class="overflow-x-auto">
         <table class="w-full text-left text-sm whitespace-nowrap">
@@ -208,7 +208,7 @@
     const P = {
       apiUrl: localStorage.getItem('crypto_sheets_url') || '',
       registros: JSON.parse(localStorage.getItem('crypto_logs')) || [],
-      mexcPrices: {}, // Guardará objeto { price: 0.00, source: 'Binance' }
+      mexcPrices: {}, 
       tcActual: 19.50
     };
 
@@ -225,17 +225,14 @@
 
     async function init() {
       await fetchTCActual();
-      // Empezamos con Binance por defecto
-      await fetchFromAPI('binance');
+      await fetchCombinado();
       if (P.apiUrl) syncFromCloud();
       
       setInterval(async () => {
-        // Refresca la última fuente usada si está todo en verde
-        const status = document.getElementById('mexcStatus').textContent;
+        const status = document.getElementById('apiStatus').textContent;
         if(status.includes('Binance')) fetchFromAPI('binance');
-        else if(status.includes('KuCoin')) fetchFromAPI('kucoin');
-        else if(status.includes('Crypto.com')) fetchFromAPI('cryptocom');
         else if(status.includes('Gate.io')) fetchFromAPI('gateio');
+        else fetchCombinado();
       }, 60000);
     }
 
@@ -261,13 +258,43 @@
       }
     }
 
-    // FUNCIONES INDIVIDUALES DE EXCHANGES PARA DIAGNÓSTICO
+    // FUNCIÓN ESTRELLA: Búsqueda Combinada (Binance + Gate.io)
+    async function fetchCombinado() {
+        updateStatusText("● Combinando...", true, "text-amber-400");
+        P.mexcPrices = {}; // Limpia
+        
+        try {
+            // 1. Cargamos Binance primero
+            const resBinance = await fetch('https://api.binance.com/api/v3/ticker/price');
+            const dataBinance = await resBinance.json();
+            dataBinance.forEach(coin => {
+                const sym = coin.symbol.replace('USDT', '');
+                if(coin.symbol.endsWith('USDT')) P.mexcPrices[sym] = { price: parseFloat(coin.price), source: 'Binance' };
+            });
+
+            // 2. Cargamos Gate.io (Donde está CRO y TRADOOR) y rellenamos huecos
+            const resGate = await fetch('https://api.gateio.ws/api/v4/spot/tickers');
+            const dataGate = await resGate.json();
+            dataGate.forEach(coin => {
+                const sym = coin.currency_pair.replace('_USDT', '');
+                // Solo si el precio no lo encontró Binance, lo tomamos de Gate
+                if(coin.currency_pair.endsWith('_USDT') && !P.mexcPrices[sym]) {
+                    P.mexcPrices[sym] = { price: parseFloat(coin.last), source: 'Gate.io' };
+                }
+            });
+
+            updateStatusText("● Live (Combinado)", true, "text-emerald-400");
+        } catch (err) {
+            console.warn("Error en modo combinado:", err);
+            updateStatusText("● Error (Combinado)", false, "text-rose-400");
+        }
+        calculateAndRender();
+    }
+
+    // Funciones manuales de diagnóstico
     async function fetchFromAPI(exchangeName) {
-      document.getElementById('mexcStatus').className = "text-amber-400";
-      document.getElementById('mexcStatus').textContent = `● Consultando ${exchangeName}...`;
-      
-      // Limpiamos los precios anteriores para ver exactamente qué encuentra el nuevo exchange
-      P.mexcPrices = {};
+      updateStatusText(`● Consultando ${exchangeName}...`, true, "text-amber-400");
+      P.mexcPrices = {}; 
 
       try {
         if (exchangeName === 'binance') {
@@ -277,29 +304,7 @@
                 const sym = coin.symbol.replace('USDT', '');
                 if(coin.symbol.endsWith('USDT')) P.mexcPrices[sym] = { price: parseFloat(coin.price), source: 'Binance' };
             });
-            updateStatusText("● Live (Binance)", true);
-
-        } else if (exchangeName === 'kucoin') {
-            const res = await fetch('https://api.kucoin.com/api/v1/market/allTickers');
-            const data = await res.json();
-            if (data && data.data && data.data.ticker) {
-                data.data.ticker.forEach(coin => {
-                    const sym = coin.symbol.replace('-USDT', '');
-                    if(coin.symbol.endsWith('-USDT')) P.mexcPrices[sym] = { price: parseFloat(coin.last), source: 'KuCoin' };
-                });
-            }
-            updateStatusText("● Live (KuCoin)", true);
-
-        } else if (exchangeName === 'cryptocom') {
-            const res = await fetch('https://api.crypto.com/v2/public/get-ticker');
-            const data = await res.json();
-            if (data && data.result && data.result.data) {
-                data.result.data.forEach(coin => {
-                    const sym = coin.i.replace('_USDT', '');
-                    if(coin.i.endsWith('_USDT')) P.mexcPrices[sym] = { price: parseFloat(coin.a), source: 'Crypto.com' };
-                });
-            }
-            updateStatusText("● Live (Crypto.com)", true);
+            updateStatusText("● Live (Binance)", true, "text-yellow-500");
 
         } else if (exchangeName === 'gateio') {
             const res = await fetch('https://api.gateio.ws/api/v4/spot/tickers');
@@ -308,19 +313,18 @@
                 const sym = coin.currency_pair.replace('_USDT', '');
                 if(coin.currency_pair.endsWith('_USDT')) P.mexcPrices[sym] = { price: parseFloat(coin.last), source: 'Gate.io' };
             });
-            updateStatusText("● Live (Gate.io)", true);
+            updateStatusText("● Live (Gate.io)", true, "text-red-400");
         }
       } catch (err) {
-        console.warn(`Error en ${exchangeName}:`, err);
-        updateStatusText(`● Error en ${exchangeName}`, false);
+        updateStatusText(`● Error en ${exchangeName}`, false, "text-rose-400");
       }
-      
       calculateAndRender();
     }
 
-    function updateStatusText(text, isSuccess) {
-        document.getElementById('mexcStatus').className = isSuccess ? "text-emerald-400 font-bold" : "text-rose-400 font-bold";
-        document.getElementById('mexcStatus').textContent = text;
+    function updateStatusText(text, isSuccess, colorClass) {
+        const el = document.getElementById('apiStatus');
+        el.className = `font-bold ${colorClass}`;
+        el.textContent = text;
     }
 
     async function autoFetchTC() {
@@ -366,7 +370,6 @@
       });
 
       const arrPortfolio = Object.values(portfolio).map(p => {
-        // Leemos el objeto complejo {price, source}
         let coinData = P.mexcPrices[p.moneda] || { price: 0, source: 'No encontrado' };
         let precioActual = coinData.price;
         let fuente = coinData.source;
@@ -410,7 +413,7 @@
           <td class="px-4 py-3">${fmtUsd.format(p.promedioUsd)}</td>
           <td class="px-4 py-3">
              <div class="${p.precioActual > 0 ? 'text-slate-200' : 'text-rose-400'}">${fmtUsd.format(p.precioActual)}</div>
-             <div class="text-[9px] text-slate-500 uppercase tracking-widest">${p.fuente}</div>
+             <div class="text-[9px] text-slate-500 uppercase tracking-widest font-bold">${p.fuente}</div>
           </td>
           <td class="px-4 py-3 text-right font-semibold">${fmtMoney.format(p.valorMxn)}</td>
           <td class="px-4 py-3 text-right font-bold ${formatColor(p.gananciaNetaMxn)}">
@@ -422,15 +425,15 @@
 
       const tbodyHist = document.getElementById('historyBody');
       tbodyHist.innerHTML = [...P.registros].reverse().map(r => `
-        <tr class="hover:bg-slate-800/40 text-xs">
+        <tr class="hover:bg-slate-800/40 text-xs border-b border-slate-800/30">
           <td class="px-4 py-2">${r.fecha}</td>
-          <td class="px-4 py-2 font-bold">${r.moneda}</td>
-          <td class="px-4 py-2 text-right">${r.cantidad}</td>
+          <td class="px-4 py-2 font-bold text-amber-400">${r.moneda}</td>
+          <td class="px-4 py-2 text-right">${r.cantidad.toLocaleString('en-US')}</td>
           <td class="px-4 py-2 text-right">${fmtUsd.format(r.precioUsd)}</td>
           <td class="px-4 py-2 text-right">$${r.tcCompraMxn}</td>
-          <td class="px-4 py-2 text-right">${fmtMoney.format(r.cantidad * r.precioUsd * r.tcCompraMxn)}</td>
+          <td class="px-4 py-2 text-right font-medium">${fmtMoney.format(r.cantidad * r.precioUsd * r.tcCompraMxn)}</td>
           <td class="px-4 py-2 text-center">
-            <button onclick="deletePurchase('${r.id}')" class="text-slate-500 hover:text-rose-400">✕</button>
+            <button onclick="deletePurchase('${r.id}')" class="text-slate-500 hover:text-rose-400 font-bold px-2 py-1 bg-slate-800 rounded">✕</button>
           </td>
         </tr>
       `).join('');
@@ -496,8 +499,8 @@
 
     function syncFromCloud() {
       if(!P.apiUrl) return;
-      const btn = document.getElementById('btnRefresh');
-      btn.textContent = '...';
+      const btn = document.getElementById('btnSyncBig');
+      btn.textContent = 'Cargando...';
       
       const scriptId = 'jsonp-script-' + Date.now();
       const callbackName = 'jsonpCallback_' + Date.now();
@@ -510,7 +513,7 @@
         }
         document.getElementById(scriptId).remove();
         delete window[callbackName];
-        btn.textContent = '⟳';
+        btn.textContent = '⟳ Sincronizar Sheets';
       };
 
       const script = document.createElement('script');
@@ -518,24 +521,11 @@
       script.src = `${P.apiUrl}?callback=${callbackName}`;
       
       script.onerror = function() {
-        console.error("Error en conexión con Sheets");
-        btn.textContent = '⟳';
+        console.error("Error en conexión con Sheets (JSONP)");
+        btn.textContent = 'Error. Revisa URL';
       };
 
       document.body.appendChild(script);
-    }
-
-    async function refreshData() {
-      await fetchTCActual();
-      // Identificamos en qué API estamos actualmente
-      const status = document.getElementById('mexcStatus').textContent;
-      if(status.includes('KuCoin')) await fetchFromAPI('kucoin');
-      else if(status.includes('Crypto.com')) await fetchFromAPI('cryptocom');
-      else if(status.includes('Gate.io')) await fetchFromAPI('gateio');
-      else await fetchFromAPI('binance');
-      
-      if(P.apiUrl) syncFromCloud();
-      else calculateAndRender();
     }
 
     init();
