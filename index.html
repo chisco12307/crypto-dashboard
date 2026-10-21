@@ -41,7 +41,7 @@
           <div class="flex items-center gap-2 text-xs text-slate-400">
             <span id="tcStatus">TC Actual: Cargando...</span>
             <span class="text-slate-600">|</span>
-            <span id="mexcStatus" class="text-emerald-400">● MEXC Live</span>
+            <span id="mexcStatus" class="text-emerald-400">● Live</span>
           </div>
         </div>
       </div>
@@ -216,12 +216,12 @@
 
     async function init() {
       await fetchTCActual();
-      await fetchMEXCPrices();
+      await fetchCryptoPrices();
       calculateAndRender();
       if (P.apiUrl) syncFromCloud();
       
       setInterval(async () => {
-        await fetchMEXCPrices();
+        await fetchCryptoPrices();
         calculateAndRender();
       }, 60000);
     }
@@ -248,46 +248,24 @@
       }
     }
 
-// Nueva función robusta que usa tu propio Google Apps Script para evitar proxys
-    function fetchMEXCPrices() {
-      if (!P.apiUrl) {
-          document.getElementById('mexcStatus').className = "text-amber-400";
-          document.getElementById('mexcStatus').textContent = "● Conecta a Sheets primero";
-          return;
-      }
-      
-      const scriptId = 'jsonp-mexc-' + Date.now();
-      const callbackName = 'mexcCallback_' + Date.now();
-      
-      window[callbackName] = function(response) {
-        if(response.status === 'ok') {
-          response.data.forEach(coin => {
-            P.mexcPrices[coin.symbol] = parseFloat(coin.price);
-          });
-          document.getElementById('mexcStatus').className = "text-emerald-400";
-          document.getElementById('mexcStatus').textContent = "● MEXC Live";
-          calculateAndRender(); // Actualiza la tabla inmediatamente con los nuevos precios
-        } else {
-          document.getElementById('mexcStatus').className = "text-rose-400";
-          document.getElementById('mexcStatus').textContent = "● MEXC Error";
-        }
-        document.getElementById(scriptId).remove();
-        delete window[callbackName];
-      };
-
-      const script = document.createElement('script');
-      script.id = scriptId;
-      // Llama a tu API pidiendo la acción 'mexc'
-      script.src = `${P.apiUrl}?action=mexc&callback=${callbackName}`;
-      
-      script.onerror = function() {
+    // NUEVA SOLUCIÓN: API de Binance Directa (CORS amigable)
+    async function fetchCryptoPrices() {
+      try {
+        const res = await fetch('https://api.binance.com/api/v3/ticker/price');
+        const data = await res.json();
+        
+        data.forEach(coin => {
+          P.mexcPrices[coin.symbol] = parseFloat(coin.price);
+        });
+        
+        document.getElementById('mexcStatus').className = "text-emerald-400";
+        document.getElementById('mexcStatus').textContent = "● Live (Binance API)";
+        calculateAndRender();
+      } catch (err) {
+        console.warn("Error Binance:", err);
         document.getElementById('mexcStatus').className = "text-rose-400";
-        document.getElementById('mexcStatus').textContent = "● MEXC Error";
-        document.getElementById(scriptId).remove();
-        delete window[callbackName];
-      };
-
-      document.body.appendChild(script);
+        document.getElementById('mexcStatus').textContent = "● Error Precios";
+      }
     }
 
     async function autoFetchTC() {
@@ -431,12 +409,12 @@
               body: JSON.stringify(payload) 
           });
           setTimeout(() => syncFromCloud(), 2000); 
-        } catch(err) { console.error("Error", err); }
+        } catch(err) { console.error("Error guardando en nube", err); }
       }
     }
 
     async function deletePurchase(id) {
-      if(!confirm("¿Eliminar este registro?")) return;
+      if(!confirm("¿Eliminar este registro? Alterará tu promedio de compra.")) return;
       P.registros = P.registros.filter(r => r.id !== id);
       localStorage.setItem('crypto_logs', JSON.stringify(P.registros));
       calculateAndRender();
@@ -450,11 +428,10 @@
                 body: JSON.stringify({ action: 'delete', id }) 
             }); 
         }
-        catch(err) { console.error("Error", err); }
+        catch(err) { console.error("Error eliminando en nube", err); }
       }
     }
 
-    // CORRECCIÓN DEFINITIVA SHEETS: Usar JSONP para evitar bloqueos de CORS
     function syncFromCloud() {
       if(!P.apiUrl) return;
       const btn = document.getElementById('btnRefresh');
@@ -463,7 +440,6 @@
       const scriptId = 'jsonp-script-' + Date.now();
       const callbackName = 'jsonpCallback_' + Date.now();
       
-      // Función que se ejecutará cuando Google responda
       window[callbackName] = function(data) {
         if(data.status === 'ok') {
           P.registros = data.registros;
@@ -475,13 +451,12 @@
         btn.textContent = '⟳';
       };
 
-      // Inyectamos el script para hacer la petición a prueba de CORS
       const script = document.createElement('script');
       script.id = scriptId;
       script.src = `${P.apiUrl}?callback=${callbackName}`;
       
       script.onerror = function() {
-        alert("Error de conexión con Sheets. Revisa la URL ingresada.");
+        console.error("Error en JSONP de Google Sheets");
         btn.textContent = '⟳';
       };
 
@@ -490,7 +465,7 @@
 
     async function refreshData() {
       await fetchTCActual();
-      await fetchMEXCPrices();
+      await fetchCryptoPrices();
       if(P.apiUrl) syncFromCloud();
       else calculateAndRender();
     }
