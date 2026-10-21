@@ -248,21 +248,58 @@
       }
     }
 
-    // NUEVA SOLUCIÓN: API de Binance Directa (CORS amigable)
+    // LÓGICA HÍBRIDA: Binance + KuCoin
     async function fetchCryptoPrices() {
       try {
-        const res = await fetch('https://api.binance.com/api/v3/ticker/price');
-        const data = await res.json();
+        // 1. Intentamos obtener los precios principales de Binance
+        const resBinance = await fetch('https://api.binance.com/api/v3/ticker/price');
+        const dataBinance = await resBinance.json();
         
-        data.forEach(coin => {
+        dataBinance.forEach(coin => {
           P.mexcPrices[coin.symbol] = parseFloat(coin.price);
         });
-        
+
+        // Verificamos si alguna moneda de nuestro portafolio NO se encontró en Binance
+        let monedasFaltantes = false;
+        const monedasUnicas = [...new Set(P.registros.map(r => r.moneda))];
+        for (let moneda of monedasUnicas) {
+            if (!P.mexcPrices[moneda + 'USDT']) {
+                monedasFaltantes = true;
+                break;
+            }
+        }
+
+        // 2. Si faltan monedas (como CRO o TRADOOR), buscamos en KuCoin como respaldo
+        if (monedasFaltantes) {
+            try {
+                // KuCoin usa el formato CRO-USDT
+                const resKucoin = await fetch('https://api.kucoin.com/api/v1/market/allTickers');
+                const dataKucoin = await resKucoin.json();
+                
+                if (dataKucoin && dataKucoin.data && dataKucoin.data.ticker) {
+                    dataKucoin.data.ticker.forEach(coin => {
+                        // Limpiamos el guión para que coincida con nuestro formato (CROUSDT)
+                        const symbol = coin.symbol.replace('-', '');
+                        // Solo actualizamos si no existía ya el precio (para dar prioridad a Binance)
+                        if (!P.mexcPrices[symbol] && coin.symbol.endsWith('-USDT')) {
+                            P.mexcPrices[symbol] = parseFloat(coin.last);
+                        }
+                    });
+                }
+            } catch (errorKucoin) {
+                console.warn("KuCoin también falló:", errorKucoin);
+            }
+        }
+
+        // 3. Fallback adicional de seguridad para TRADOOR u otras específicas
+        // (Ajusta este precio manualmente si ninguna API lo encuentra)
+        // if (!P.mexcPrices['TRADOORUSDT']) P.mexcPrices['TRADOORUSDT'] = 0.0015;
+
         document.getElementById('mexcStatus').className = "text-emerald-400";
-        document.getElementById('mexcStatus').textContent = "● Live (Binance API)";
+        document.getElementById('mexcStatus').textContent = "● Live (Binance+KuCoin)";
         calculateAndRender();
       } catch (err) {
-        console.warn("Error Binance:", err);
+        console.warn("Error APIs de Precios:", err);
         document.getElementById('mexcStatus').className = "text-rose-400";
         document.getElementById('mexcStatus').textContent = "● Error Precios";
       }
