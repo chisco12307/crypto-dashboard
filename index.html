@@ -148,7 +148,7 @@
         <div class="grid grid-cols-2 gap-3">
           <div>
             <label class="block text-xs text-slate-400 mb-1">Moneda</label>
-            <input id="inpMoneda" type="text" placeholder="Ej. ADA, SOL" required class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-500 uppercase">
+            <input id="inpMoneda" type="text" placeholder="Ej. ADA, CRO" required class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-500 uppercase">
           </div>
           <div>
             <label class="block text-xs text-slate-400 mb-1">Fecha</label>
@@ -248,10 +248,10 @@
       }
     }
 
-    // LÓGICA HÍBRIDA: Binance + KuCoin
+    // NUEVA LÓGICA HÍBRIDA: Binance (Principal) + Crypto.com (Respaldo para CRO/TRADOOR)
     async function fetchCryptoPrices() {
       try {
-        // 1. Intentamos obtener los precios principales de Binance
+        // 1. Obtener de Binance (API Principal)
         const resBinance = await fetch('https://api.binance.com/api/v3/ticker/price');
         const dataBinance = await resBinance.json();
         
@@ -259,44 +259,40 @@
           P.mexcPrices[coin.symbol] = parseFloat(coin.price);
         });
 
-        // Verificamos si alguna moneda de nuestro portafolio NO se encontró en Binance
-        let monedasFaltantes = false;
+        // Revisar si falta alguna moneda
         const monedasUnicas = [...new Set(P.registros.map(r => r.moneda))];
-        for (let moneda of monedasUnicas) {
-            if (!P.mexcPrices[moneda + 'USDT']) {
-                monedasFaltantes = true;
-                break;
-            }
+        let faltanMonedas = false;
+        for (let m of monedasUnicas) {
+            if (!P.mexcPrices[m + 'USDT']) faltanMonedas = true;
         }
 
-        // 2. Si faltan monedas (como CRO o TRADOOR), buscamos en KuCoin como respaldo
-        if (monedasFaltantes) {
+        // 2. Si faltan monedas (ej. CRO), buscamos en Crypto.com
+        if (faltanMonedas) {
             try {
-                // KuCoin usa el formato CRO-USDT
-                const resKucoin = await fetch('https://api.kucoin.com/api/v1/market/allTickers');
-                const dataKucoin = await resKucoin.json();
+                // Crypto.com usa formato CRO_USDT
+                const resCrypto = await fetch('https://api.crypto.com/v2/public/get-ticker');
+                const dataCrypto = await resCrypto.json();
                 
-                if (dataKucoin && dataKucoin.data && dataKucoin.data.ticker) {
-                    dataKucoin.data.ticker.forEach(coin => {
-                        // Limpiamos el guión para que coincida con nuestro formato (CROUSDT)
-                        const symbol = coin.symbol.replace('-', '');
-                        // Solo actualizamos si no existía ya el precio (para dar prioridad a Binance)
-                        if (!P.mexcPrices[symbol] && coin.symbol.endsWith('-USDT')) {
-                            P.mexcPrices[symbol] = parseFloat(coin.last);
+                if (dataCrypto && dataCrypto.result && dataCrypto.result.data) {
+                    dataCrypto.result.data.forEach(coin => {
+                        // Limpiamos el guion bajo para empatar formato (CROUSDT)
+                        const symbol = coin.i.replace('_', '');
+                        if (!P.mexcPrices[symbol] && coin.i.endsWith('_USDT')) {
+                            // 'a' es el precio actual en la API de Crypto.com
+                            P.mexcPrices[symbol] = parseFloat(coin.a);
                         }
                     });
                 }
-            } catch (errorKucoin) {
-                console.warn("KuCoin también falló:", errorKucoin);
+            } catch (errFallback) {
+                console.warn("Fallback Crypto.com falló:", errFallback);
             }
         }
 
-        // 3. Fallback adicional de seguridad para TRADOOR u otras específicas
-        // (Ajusta este precio manualmente si ninguna API lo encuentra)
-        // if (!P.mexcPrices['TRADOORUSDT']) P.mexcPrices['TRADOORUSDT'] = 0.0015;
+        // 3. Fallback estricto de emergencia (Por si alguna otra nueva moneda no se encuentra)
+        // P.mexcPrices['TRADOORUSDT'] = 0.001; 
 
         document.getElementById('mexcStatus').className = "text-emerald-400";
-        document.getElementById('mexcStatus').textContent = "● Live (Binance+KuCoin)";
+        document.getElementById('mexcStatus').textContent = "● Live (Multimercado)";
         calculateAndRender();
       } catch (err) {
         console.warn("Error APIs de Precios:", err);
@@ -446,7 +442,7 @@
               body: JSON.stringify(payload) 
           });
           setTimeout(() => syncFromCloud(), 2000); 
-        } catch(err) { console.error("Error guardando en nube", err); }
+        } catch(err) { console.error("Error guardando", err); }
       }
     }
 
@@ -465,7 +461,7 @@
                 body: JSON.stringify({ action: 'delete', id }) 
             }); 
         }
-        catch(err) { console.error("Error eliminando en nube", err); }
+        catch(err) { console.error("Error eliminando", err); }
       }
     }
 
@@ -493,7 +489,7 @@
       script.src = `${P.apiUrl}?callback=${callbackName}`;
       
       script.onerror = function() {
-        console.error("Error en JSONP de Google Sheets");
+        console.error("Error en conexión con Sheets");
         btn.textContent = '⟳';
       };
 
