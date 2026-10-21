@@ -248,26 +248,46 @@
       }
     }
 
-    // CORRECCIÓN MEXC: Usar corsproxy.io que es mucho más estable
-    async function fetchMEXCPrices() {
-      try {
-        const targetUrl = encodeURIComponent('https://api.mexc.com/api/v3/ticker/price');
-        const proxyUrl = `https://corsproxy.io/?${targetUrl}`;
-        
-        const res = await fetch(proxyUrl);
-        const data = await res.json();
-        
-        data.forEach(coin => {
-          P.mexcPrices[coin.symbol] = parseFloat(coin.price);
-        });
-        
-        document.getElementById('mexcStatus').className = "text-emerald-400";
-        document.getElementById('mexcStatus').textContent = "● MEXC Live";
-      } catch (err) {
-        console.warn("MEXC falló:", err);
+// Nueva función robusta que usa tu propio Google Apps Script para evitar proxys
+    function fetchMEXCPrices() {
+      if (!P.apiUrl) {
+          document.getElementById('mexcStatus').className = "text-amber-400";
+          document.getElementById('mexcStatus').textContent = "● Conecta a Sheets primero";
+          return;
+      }
+      
+      const scriptId = 'jsonp-mexc-' + Date.now();
+      const callbackName = 'mexcCallback_' + Date.now();
+      
+      window[callbackName] = function(response) {
+        if(response.status === 'ok') {
+          response.data.forEach(coin => {
+            P.mexcPrices[coin.symbol] = parseFloat(coin.price);
+          });
+          document.getElementById('mexcStatus').className = "text-emerald-400";
+          document.getElementById('mexcStatus').textContent = "● MEXC Live";
+          calculateAndRender(); // Actualiza la tabla inmediatamente con los nuevos precios
+        } else {
+          document.getElementById('mexcStatus').className = "text-rose-400";
+          document.getElementById('mexcStatus').textContent = "● MEXC Error";
+        }
+        document.getElementById(scriptId).remove();
+        delete window[callbackName];
+      };
+
+      const script = document.createElement('script');
+      script.id = scriptId;
+      // Llama a tu API pidiendo la acción 'mexc'
+      script.src = `${P.apiUrl}?action=mexc&callback=${callbackName}`;
+      
+      script.onerror = function() {
         document.getElementById('mexcStatus').className = "text-rose-400";
         document.getElementById('mexcStatus').textContent = "● MEXC Error";
-      }
+        document.getElementById(scriptId).remove();
+        delete window[callbackName];
+      };
+
+      document.body.appendChild(script);
     }
 
     async function autoFetchTC() {
